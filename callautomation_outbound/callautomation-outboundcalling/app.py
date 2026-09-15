@@ -102,6 +102,7 @@ def callback_events_handler():
         event = CloudEvent.from_dict(event_dict)
         call_connection_id = event.data['callConnectionId']
         app.logger.info("%s event received for call connection id: %s", event.type, call_connection_id)
+        print(f"{event.type} event received for call connection id: {call_connection_id}")
         call_connection_client = call_automation_client.get_call_connection(call_connection_id)
         target_participant = PhoneNumberIdentifier(TARGET_PHONE_NUMBER)
         if event.type == "Microsoft.Communication.CallConnected":
