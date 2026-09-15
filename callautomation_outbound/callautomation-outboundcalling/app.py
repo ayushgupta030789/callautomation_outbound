@@ -87,8 +87,10 @@ def outbound_call_handler():
                                                                     cognitive_services_endpoint=COGNITIVE_SERVICES_ENDPOINT,
                                                                     source_caller_id_number=source_caller)
     app.logger.info("Created call with connection id: %s", call_connection_properties.call_connection_id)
-    print(create_call_result.call_connection.call_connection_id)
-    print(create_call_result.call_connection_properties.call_connection_state)
+    call_connection_id = call_connection_properties.call_connection_id
+    app.logger.info("Outbound call creation request accepted. Call connection ID: %s",
+    call_connection_id)
+    print(f"Created call with connection ID: {call_connection_id}",flush=True)
     return redirect("/")
 
 
