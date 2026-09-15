@@ -51,14 +51,6 @@ CANCEL_CHOICE_LABEL = "Cancel"
 RETRY_CONTEXT = "retry"
 
 call_automation_client = CallAutomationClient.from_connection_string(ACS_CONNECTION_STRING)
-logging.basicConfig(
-level=logging.INFO,
-format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-handlers=[
-logging.StreamHandler(sys.stdout)
-],
-force=True
-)
 app = Flask(__name__,
             template_folder=TEMPLATE_FILES_PATH)
 
