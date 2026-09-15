@@ -1,6 +1,7 @@
 from azure.eventgrid import EventGridEvent, SystemEventNames
 from flask import Flask, Response, request, json, send_file, render_template, redirect
 from logging import INFO
+import logging
 from azure.communication.callautomation import (
     CallAutomationClient,
     CallConnectionClient,
