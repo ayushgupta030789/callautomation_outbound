@@ -98,6 +98,10 @@ def outbound_call_handler():
 @app.route('/api/callbacks', methods=['POST'])
 def callback_events_handler():
     for event_dict in request.json:
+        if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
+	        validation_code = event_dict["data"]["validationCode"]
+	        print(f"Validation code received: {validation_code}")
+	        return {"validationResponse": validation_code}, 200
         # Parsing callback events
         event = CloudEvent.from_dict(event_dict)
         call_connection_id = event.data['callConnectionId']
