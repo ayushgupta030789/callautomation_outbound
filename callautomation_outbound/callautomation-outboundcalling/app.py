@@ -97,7 +97,9 @@ def outbound_call_handler():
 # POST endpoint to handle callback events
 @app.route('/api/callbacks', methods=['POST'])
 def callback_events_handler():
+	print("api callbacks fucntion is called")
     for event_dict in request.json:
+		print(request.json)
         if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
 	        validation_code = event_dict["data"]["validationCode"]
 	        print(f"Validation code received: {validation_code}")
@@ -165,7 +167,9 @@ def callback_events_handler():
 # GET endpoint to render the menus
 @app.route('/')
 def index_handler():
-    return render_template("index.html")
+    print("Web Page is loaded")
+	return render_template("index.html")
+	
 
 
 if __name__ == '__main__':
