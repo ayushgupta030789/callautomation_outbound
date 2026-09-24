@@ -90,6 +90,7 @@ def outbound_call_handler():
     call_connection_id = call_connection_properties.call_connection_id
     app.logger.info("Outbound call creation request accepted. Call connection ID: %s",
     call_connection_id)
+	print("call connection properties are", call_connection_properties, flush=True)
     print(f"Created call with connection ID: {call_connection_id}",flush=True)
     return redirect("/")
 
