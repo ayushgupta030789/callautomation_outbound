@@ -100,7 +100,7 @@ def outbound_call_handler():
 def callback_events_handler():
 	print("api callbacks fucntion is called")
     for event_dict in request.json:
-		print(request.json)
+		print("Event is here", request.json)
         if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
 	        validation_code = event_dict["data"]["validationCode"]
 	        print(f"Validation code received: {validation_code}")
