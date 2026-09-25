@@ -96,7 +96,80 @@ def outbound_call_handler():
 
 
 # POST endpoint to handle callback events
+# POST endpoint to handle callback events
 @app.route('/api/callbacks', methods=['POST'])
+def callback_events_handler():
+	for event_dict in request.json:
+
+		print(event_dict)
+
+		if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
+			validation_code = event_dict["data"]["validationCode"]
+			return {"validationResponse": validation_code}, 200
+
+		event_type = event_dict["eventType"]
+		event_data = event_dict["data"]
+
+		call_connection_id = event_data["callConnectionId"]
+
+		print(f"{event_type} received")
+        app.logger.info("%s event received for call connection id: %s", event_type, call_connection_id)
+        print(f"{event_type} event received for call connection id: {call_connection_id}")
+        call_connection_client = call_automation_client.get_call_connection(call_connection_id)
+        target_participant = PhoneNumberIdentifier(TARGET_PHONE_NUMBER)
+        if event_type == "Microsoft.Communication.CallConnected":
+            # (Optional) Add a Microsoft Teams user to the call.  Uncomment the below snippet to enable Teams Interop scenario.
+            # call_connection_client.add_participant(target_participant = CallInvite(
+            #     target = MicrosoftTeamsUserIdentifier(user_id=TARGET_TEAMS_USER_ID),
+            #     source_display_name = "Jack (Contoso Tech Support)"))
+            
+            app.logger.info("Starting recognize")
+            get_media_recognize_choice_options(
+                call_connection_client=call_connection_client,
+                text_to_play=MAIN_MENU, 
+                target_participant=target_participant,
+                choices=get_choices(),context="")
+            
+        # Perform different actions based on DTMF tone received from RecognizeCompleted event
+        elif event_type == "Microsoft.Communication.RecognizeCompleted":
+            app.logger.info("Recognize completed: data=%s", event_data) 
+            if event_data['recognitionType'] == "choices": 
+                 label_detected = event_data['choiceResult']['label']; 
+                 phraseDetected = event_data['choiceResult']['recognizedPhrase']; 
+                 app.logger.info("Recognition completed, labelDetected=%s, phraseDetected=%s, context=%s", label_detected, phraseDetected, event_data.get('operationContext'))
+                 if label_detected == CONFIRM_CHOICE_LABEL:
+                    text_to_play = CONFIRMED_TEXT
+                 else:
+                    text_to_play = CANCEL_TEXT
+                 handle_play(call_connection_client=call_connection_client, text_to_play=text_to_play)
+
+        elif event_type == "Microsoft.Communication.RecognizeFailed":
+            failedContext = event_data['operationContext']
+            if(failedContext and failedContext == RETRY_CONTEXT):
+                handle_play(call_connection_client=call_connection_client, text_to_play=NO_RESPONSE)
+            else:
+                resultInformation = event_data['resultInformation']
+                app.logger.info("Encountered error during recognize, message=%s, code=%s, subCode=%s", 
+                                resultInformation['message'], 
+                                resultInformation['code'],
+                                resultInformation['subCode'])
+                if(resultInformation['subCode'] in[8510, 8510]):
+                    textToPlay =CUSTOMER_QUERY_TIMEOUT
+                else :
+                    textToPlay =INVALID_AUDIO
+                
+                get_media_recognize_choice_options(
+                    call_connection_client=call_connection_client,
+                    text_to_play=textToPlay, 
+                    target_participant=target_participant,
+                    choices=get_choices(),context=RETRY_CONTEXT)
+
+        elif event_type in ["Microsoft.Communication.PlayCompleted", "Microsoft.Communication.PlayFailed"]:
+            app.logger.info("Terminating call")
+            call_connection_client.hang_up(is_for_everyone=True)
+
+        return Response(status=200)
+'''@app.route('/api/callbacks', methods=['POST'])
 def callback_events_handler():
 	print("api callbacks fucntion is called")
     for event_dict in request.json:
@@ -163,7 +236,7 @@ def callback_events_handler():
             app.logger.info("Terminating call")
             call_connection_client.hang_up(is_for_everyone=True)
 
-        return Response(status=200)
+        return Response(status=200)'''
 
 # GET endpoint to render the menus
 @app.route('/')
