@@ -27,6 +27,7 @@ ACS_PHONE_NUMBER = os.environ["ACS_PHONE_NUMBER"]
 TARGET_PHONE_NUMBER = os.environ["TARGET_PHONE_NUMBER"]
 
 CALLBACK_URI_HOST = os.environ["CALLBACK_URI_HOST"]
+SECOND_PARTICIPANT_NUMBER = os.environ["SECOND_PARTICIPANT_NUMBER"]
 
 COGNITIVE_SERVICES_ENDPOINT = os.environ["COGNITIVE_SERVICES_ENDPOINT"]
 # Your ACS resource connection string
@@ -51,8 +52,42 @@ CANCEL_CHOICE_LABEL = "Cancel"
 RETRY_CONTEXT = "retry"
 
 call_automation_client = CallAutomationClient.from_connection_string(ACS_CONNECTION_STRING)
-app = Flask(__name__,
-            template_folder=TEMPLATE_FILES_PATH)
+app = Flask(__name__, template_folder=TEMPLATE_FILES_PATH)
+
+def add_second_pstn_participant(
+    call_connection_client,
+    call_connection_id
+):
+    try:
+        second_participant = PhoneNumberIdentifier(SECOND_PARTICIPANT_NUMBER)
+        print("adding 2nd participant")
+        acs_caller_id = PhoneNumberIdentifier(
+            ACS_PHONE_NUMBER
+        )
+
+        result = call_connection_client.add_participant(
+            target_participant=second_participant,
+
+            # The same ACS-purchased number is shown as caller ID.
+            source_caller_id_number=acs_caller_id,
+
+            # Returned in success/failure callback events.
+            operation_context="add-second-pstn-participant",
+
+            # Optional because the call already has the default
+            # callback URL from create_call().
+            operation_callback_url=CALLBACK_EVENTS_URI
+        )
+
+        print(f"Add participant request submitted. callConnectionId={call_connection_id}, invitationId={getattr(result, 'invitation_id', None)}, target={SECOND_PARTICIPANT_NUMBER}")
+
+    except Exception:
+        app.logger.exception(
+            "Failed to submit add-participant request. "
+            "callConnectionId=%s",
+            call_connection_id
+        )
+        print(f"Failed to submit add-participant request. callConnectionId={call_connection_id}")
 
 def get_choices():
     choices = [
@@ -63,6 +98,7 @@ def get_choices():
 
 def get_media_recognize_choice_options(call_connection_client: CallConnectionClient, text_to_play: str, target_participant:str, choices: any, context: str):
      play_source =  TextSource (text= text_to_play, voice_name= SPEECH_TO_TEXT_VOICE)
+     print("Call is in get_media_recognize function")
      call_connection_client.start_recognizing_media(
                 input_type=RecognizeInputType.CHOICES,
                 target_participant=target_participant,
@@ -82,37 +118,113 @@ def handle_play(call_connection_client: CallConnectionClient, text_to_play: str)
 def outbound_call_handler():
     target_participant = PhoneNumberIdentifier(TARGET_PHONE_NUMBER)
     source_caller = PhoneNumberIdentifier(ACS_PHONE_NUMBER)
-    call_connection_properties = call_automation_client.create_call(target_participant, 
-                                                                    CALLBACK_EVENTS_URI,
+    call_connection_properties = call_automation_client.create_call(target_participant=target_participant, 
+                                                                    callback_url=CALLBACK_EVENTS_URI,
                                                                     cognitive_services_endpoint=COGNITIVE_SERVICES_ENDPOINT,
                                                                     source_caller_id_number=source_caller)
     app.logger.info("Created call with connection id: %s", call_connection_properties.call_connection_id)
     call_connection_id = call_connection_properties.call_connection_id
     app.logger.info("Outbound call creation request accepted. Call connection ID: %s",
     call_connection_id)
-	print("call connection properties are", call_connection_properties, flush=True)
+    print("call connection properties are", call_connection_properties, flush=True)
     print(f"Created call with connection ID: {call_connection_id}",flush=True)
     return redirect("/")
+    
 
 
-# POST endpoint to handle callback events
 # POST endpoint to handle callback events
 @app.route('/api/callbacks', methods=['POST'])
 def callback_events_handler():
-	for event_dict in request.json:
+    
 
-		print(event_dict)
+    print(f"The event received is {request.json}")
+    for event_dict in request.json:
+        # Parsing callback events
+        event = CloudEvent.from_dict(event_dict)
+        call_connection_id = event.data['callConnectionId']
+        app.logger.info("%s event received for call connection id: %s", event.type, call_connection_id)
+        print(f"{event.type} received")
+        call_connection_client = call_automation_client.get_call_connection(call_connection_id)
+        target_participant = PhoneNumberIdentifier(TARGET_PHONE_NUMBER)
+        if event.type == "Microsoft.Communication.CallConnected":
+            print("Call Connected")
+            # (Optional) Add a Microsoft Teams user to the call.  Uncomment the below snippet to enable Teams Interop scenario.
+            # call_connection_client.add_participant(target_participant = CallInvite(
+            #     target = MicrosoftTeamsUserIdentifier(user_id=TARGET_TEAMS_USER_ID),
+            #     source_display_name = "Jack (Contoso Tech Support)"))
+            
+            app.logger.info("Adding participant 2")
+            # Call your existing function here.
+            add_second_pstn_participant(
+                call_connection_client=call_connection_client,
+                call_connection_id=call_connection_id
+            )
+            '''get_media_recognize_choice_options(
+                call_connection_client=call_connection_client,
+                text_to_play=MAIN_MENU, 
+                target_participant=target_participant,
+                choices=get_choices(),context="")
+            '''
+        # Perform different actions based on DTMF tone received from RecognizeCompleted event
+        elif event.type == "Microsoft.Communication.RecognizeCompleted":
+            app.logger.info("Recognize completed: data=%s", event.data) 
+            if event.data['recognitionType'] == "choices": 
+                 label_detected = event.data['choiceResult']['label']; 
+                 phraseDetected = event.data['choiceResult']['recognizedPhrase']; 
+                 app.logger.info("Recognition completed, labelDetected=%s, phraseDetected=%s, context=%s", label_detected, phraseDetected, event.data.get('operationContext'))
+                 if label_detected == CONFIRM_CHOICE_LABEL:
+                    text_to_play = CONFIRMED_TEXT
+                 else:
+                    text_to_play = CANCEL_TEXT
+                 handle_play(call_connection_client=call_connection_client, text_to_play=text_to_play)
 
-		if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
-			validation_code = event_dict["data"]["validationCode"]
-			return {"validationResponse": validation_code}, 200
+        elif event.type == "Microsoft.Communication.RecognizeFailed":
+            failedContext = event.data['operationContext']
+            if(failedContext and failedContext == RETRY_CONTEXT):
+                handle_play(call_connection_client=call_connection_client, text_to_play=NO_RESPONSE)
+            else:
+                resultInformation = event.data['resultInformation']
+                app.logger.info("Encountered error during recognize, message=%s, code=%s, subCode=%s", 
+                                resultInformation['message'], 
+                                resultInformation['code'],
+                                resultInformation['subCode'])
+                if(resultInformation['subCode'] in[8510, 8510]):
+                    textToPlay =CUSTOMER_QUERY_TIMEOUT
+                else :
+                    textToPlay =INVALID_AUDIO
+                
+                get_media_recognize_choice_options(
+                    call_connection_client=call_connection_client,
+                    text_to_play=textToPlay, 
+                    target_participant=target_participant,
+                    choices=get_choices(),context=RETRY_CONTEXT)
 
-		event_type = event_dict["eventType"]
-		event_data = event_dict["data"]
+        elif event.type in ["Microsoft.Communication.PlayCompleted", "Microsoft.Communication.PlayFailed"]:
+            app.logger.info("Terminating call")
+            call_connection_client.hang_up(is_for_everyone=True)
+        elif event.type == "Microsoft.Communication.AddParticipantFailed":
+            print("Failed to add second participant")
+            print(event.data)
+        elif event.type == "Microsoft.Communication.AddParticipantSucceeded":
+            print("Second participant connected")
 
-		call_connection_id = event_data["callConnectionId"]
 
-		print(f"{event_type} received")
+        return Response(status=200)
+
+# GET endpoint to render the menus
+# POST endpoint to handle callback events
+'''
+@app.route('/api/callbacks', methods=['POST'])
+def callback_events_handler():
+    print(f"The event received is {request.json}")
+    for event_dict in request.json:
+        if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
+            validation_code = event_dict["data"]["validationCode"]
+            return {"validationResponse": validation_code}, 200
+        event_type = event_dict["eventType"]
+        event_data = event_dict["data"]
+        call_connection_id = event_data["callConnectionId"]
+        print(f"{event_type} received")
         app.logger.info("%s event received for call connection id: %s", event_type, call_connection_id)
         print(f"{event_type} event received for call connection id: {call_connection_id}")
         call_connection_client = call_automation_client.get_call_connection(call_connection_id)
@@ -124,6 +236,7 @@ def callback_events_handler():
             #     source_display_name = "Jack (Contoso Tech Support)"))
             
             app.logger.info("Starting recognize")
+            print("Call Connected")
             get_media_recognize_choice_options(
                 call_connection_client=call_connection_client,
                 text_to_play=MAIN_MENU, 
@@ -136,6 +249,11 @@ def callback_events_handler():
             if event_data['recognitionType'] == "choices": 
                  label_detected = event_data['choiceResult']['label']; 
                  phraseDetected = event_data['choiceResult']['recognizedPhrase']; 
+                 print(f"Recognition completed, "
+                        f"labelDetected={label_detected}, "
+                        f"phraseDetected={phraseDetected}, "
+                        f"context={event_data.get('operationContext')}"
+                        )
                  app.logger.info("Recognition completed, labelDetected=%s, phraseDetected=%s, context=%s", label_detected, phraseDetected, event_data.get('operationContext'))
                  if label_detected == CONFIRM_CHOICE_LABEL:
                     text_to_play = CONFIRMED_TEXT
@@ -153,6 +271,8 @@ def callback_events_handler():
                                 resultInformation['message'], 
                                 resultInformation['code'],
                                 resultInformation['subCode'])
+                print(f"Encountered error during recognize, message={resultInformation['message']}, code={resultInformation['code']}, subCode={resultInformation['subCode']}")
+
                 if(resultInformation['subCode'] in[8510, 8510]):
                     textToPlay =CUSTOMER_QUERY_TIMEOUT
                 else :
@@ -166,18 +286,19 @@ def callback_events_handler():
 
         elif event_type in ["Microsoft.Communication.PlayCompleted", "Microsoft.Communication.PlayFailed"]:
             app.logger.info("Terminating call")
+            print("Terminating call")
             call_connection_client.hang_up(is_for_everyone=True)
 
-        return Response(status=200)
+        return Response(status=200)'''
 '''@app.route('/api/callbacks', methods=['POST'])
 def callback_events_handler():
-	print("api callbacks fucntion is called")
+    print("api callbacks fucntion is called")
     for event_dict in request.json:
-		print("Event is here", request.json)
+        print("Event is here", request.json)
         if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
-	        validation_code = event_dict["data"]["validationCode"]
-	        print(f"Validation code received: {validation_code}")
-	        return {"validationResponse": validation_code}, 200
+            validation_code = event_dict["data"]["validationCode"]
+            print(f"Validation code received: {validation_code}")
+            return {"validationResponse": validation_code}, 200
         # Parsing callback events
         event = CloudEvent.from_dict(event_dict)
         call_connection_id = event.data['callConnectionId']
@@ -242,8 +363,8 @@ def callback_events_handler():
 @app.route('/')
 def index_handler():
     print("Web Page is loaded")
-	return render_template("index.html")
-	
+    return render_template("index.html")
+
 
 
 if __name__ == '__main__':
