@@ -135,10 +135,42 @@ def outbound_call_handler():
 # POST endpoint to handle callback events
 @app.route('/api/callbacks', methods=['POST'])
 def callback_events_handler():
-    
-
     print(f"The event received is {request.json}")
     for event_dict in request.json:
+        # Parsing callback events
+
+        if event_dict.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
+            validation_code = event_dict["data"]["validationCode"]
+            print(f"Validation code received: {validation_code}")
+            return {"validationResponse": validation_code}, 200
+
+############
+        if event_dict.get("eventType") == "Microsoft.Communication.IncomingCall":
+            print("Incoming call received")
+            data = event_dict.get("data", {})
+            incoming_context = data.get("incomingCallContext")
+            from_number = (
+                data.get("from", {})
+                .get("phoneNumber", {})
+                .get("value")
+                )
+            print(f"Caller = {from_number}")
+            print(f"Incoming Context = {incoming_context}")
+            try:
+# Answer the call
+                answer_result = call_automation_client.answer_call(
+                incoming_call_context=incoming_context,
+                callback_url=CALLBACK_EVENTS_URI,
+                cognitive_services_endpoint=COGNITIVE_SERVICES_ENDPOINT
+                )
+                call_connection_id = answer_result.call_connection_id
+
+                print(
+                f"Call answered. "
+                f"CallConnectionId={call_connection_id}"
+                )
+            except Exception as ex:
+                print(f"Failed to answer call: {str(ex)}")
         # Parsing callback events
         event = CloudEvent.from_dict(event_dict)
         call_connection_id = event.data['callConnectionId']
@@ -165,6 +197,8 @@ def callback_events_handler():
                 target_participant=target_participant,
                 choices=get_choices(),context="")
             '''
+
+
         # Perform different actions based on DTMF tone received from RecognizeCompleted event
         elif event.type == "Microsoft.Communication.RecognizeCompleted":
             app.logger.info("Recognize completed: data=%s", event.data) 
